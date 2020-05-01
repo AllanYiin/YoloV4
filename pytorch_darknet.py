@@ -278,8 +278,8 @@ if __name__ == '__main__':
     load_pretrained_weight(yolov4=detector.model,cfg_path='pretrained/yolov4.cfg',weight_path='pretrained/yolov4.weights')
 
     import torch
-    torch.save(detector.model, 'Models/pretrained_yolov4_mscoco.pth.tar')
-    detector.save_model('Models/pretrained_yolov4_mscoco.pth')
+    torch.save(detector.model, 'Models/pretrained_yolov4_mscoco.pth')
+    detector.save_model('Models/pretrained_yolov4_mscoco.pth.tar')
 
 
 
