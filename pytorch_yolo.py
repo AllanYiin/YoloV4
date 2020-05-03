@@ -42,7 +42,7 @@ def DarknetConv2D_BN_Leaky(*args, **kwargs):
     """Darknet Convolution2D followed by BatchNormalization and LeakyReLU."""
     darknet_conv_kwargs = {'use_bias': False,'normalization':BatchNorm2d(momentum=0.03,eps=1e-4)}
     darknet_conv_kwargs['activation']=LeakyRelu(alpha=0.1)
-    darknet_conv_kwargs['auto_pad'] = False if kwargs.get('strides') == (2, 2) else True
+    darknet_conv_kwargs['auto_pad'] = False if kwargs.get('strides')==(2,2) else True
     darknet_conv_kwargs.update(kwargs)
     return Conv2d_Block(*args, **darknet_conv_kwargs)
 
@@ -50,34 +50,15 @@ def DarknetConv2D_BN_Leaky(*args, **kwargs):
 
 def DarknetConv2D_BN_Mish(*args, **kwargs):
     """Darknet Convolution2D followed by BatchNormalization and LeakyReLU."""
-    darknet_conv_kwargs = {'use_bias': False, 'normalization':BatchNorm2d(momentum=0.03,eps=1e-4), 'activation': Mish}
-    darknet_conv_kwargs['auto_pad'] = False if kwargs.get('strides') == (2, 2) else True
+    darknet_conv_kwargs = {'use_bias': False, 'normalization':BatchNorm2d(momentum=0.03,eps=1e-4), 'activation': Mish()}
+    darknet_conv_kwargs['auto_pad'] = False if kwargs.get('strides')==(2,2) else True
     darknet_conv_kwargs.update(kwargs)
     return Conv2d_Block(*args, **darknet_conv_kwargs)
 
 
 def resblock_body(num_filters, num_blocks, all_narrow=True,keep_output=False,name=''):
-    # block=Sequential()
-    # block.add_module(name+'_preconv1',DarknetConv2D_BN_Mish((3, 3),num_filters , strides=(2, 2),auto_pad=False, padding=((1,0),(1,0)),name=name+'_preconv1'))
-    # shortconv=DarknetConv2D_BN_Mish((1, 1), num_filters // 2 if all_narrow else num_filters, name=name + '_shortconv')
-    # branch=Sequential(
-    #             DarknetConv2D_BN_Mish((1, 1), num_filters // 2 if all_narrow else num_filters,name=name+'_mainconv'),
-    #             For(range(num_blocks), lambda i:
-    #                 ShortCut2d(
-    #                     Identity(),
-    #                     Sequential(
-    #                         DarknetConv2D_BN_Mish((1, 1),num_filters // 2,name=name+'_for{0}_1'.format(i)),
-    #                         DarknetConv2D_BN_Mish((3, 3),num_filters // 2 if all_narrow else num_filters,name=name+'_for{0}_2'.format(i))
-    #                     ),
-    #                     mode='add')
-    #             ),
-    #             DarknetConv2D_BN_Mish( (1, 1),num_filters // 2 if all_narrow else num_filters,name=name+'_postconv')
-    #         )
-    # block.add_module(name+'_route',ShortCut2d(branch,shortconv,mode='concate',name=name+'_route'))
-    # block.add_module(name+'_convblock5',DarknetConv2D_BN_Mish((1,1),num_filters,name=name+'_convblock5'))
-    # return block
     return Sequential(
-        DarknetConv2D_BN_Mish((3, 3),num_filters , strides=(2, 2),auto_pad=False, padding=((1,0),(1,0)),name=name+'_preconv1'),
+        DarknetConv2D_BN_Mish((3, 3),num_filters ,strides=(2,2), auto_pad=False, padding=((1, 0), (1, 0)),name=name+'_preconv1'),
         ShortCut2d(
             {
             1:DarknetConv2D_BN_Mish((1, 1), num_filters // 2 if all_narrow else num_filters, name=name + '_shortconv'),
@@ -108,11 +89,11 @@ def resblock_body(num_filters, num_blocks, all_narrow=True,keep_output=False,nam
 class YoloLayer(Layer):
     """Detection layer"""
 
-    def __init__(self, anchors, num_classes,grid_size, img_dim=608):
+    def __init__(self, anchors, num_classes,grid_size, img_dim=608,small_item_enhance=False):
         super(YoloLayer, self).__init__()
         self.register_buffer('grid', None)
         self.register_buffer('anchors', to_tensor(anchors, requires_grad=False).to(get_device()))
-
+        self.small_item_enhance = small_item_enhance
         self.num_anchors = len(anchors)
         self.num_classes = num_classes
         self.ignore_thres = 0.5
@@ -153,7 +134,11 @@ class YoloLayer(Layer):
 
         pred_conf = sigmoid(prediction[..., 4])  # Conf
         pred_cls = sigmoid(prediction[..., 5:])  # Cls pred.
-        cls_probs=reduce_max(pred_cls,-1,keepdims=True)
+        cls_probs=reduce_max(pred_cls,-1,keepdims=False)
+
+        if self.small_item_enhance and self.stride == 8:
+            pred_conf=(pred_conf*cls_probs).sqrt()
+
         # Add offset and scale with anchors
         pred_boxes = zeros_like(prediction[..., :4])
         pred_boxes[..., 0:2] = xy + self.grid.to(get_device())
@@ -365,8 +350,8 @@ class YoloDetectionModel(ImageDetectionModel):
                     print('         detection threshold:{0}'.format(self.detection_threshold))
                     print('         {0} bboxes keep!'.format(len(boxes)))
                 if boxes is not None and len(boxes) > 0:
+                    boxes = concate([xywh2xyxy(boxes[:, :4]), boxes[:, 4:]], axis=-1)
                     boxes = to_numpy(boxes)
-                    boxes = np.concatenate([xywh2xyxy(boxes[:, :4]), boxes[:, 4:]], axis=-1)
                     if len(boxes) > 1:
                         box_probs, keep = self.hard_nms(boxes[:, :5], iou_threshold=self.iou_threshold, top_k=-1, )
                         boxes = boxes[keep]
@@ -374,6 +359,7 @@ class YoloDetectionModel(ImageDetectionModel):
                         print('         {0} bboxes keep!'.format(len(boxes)))
                     boxes[:, :4] /=scale
                     boxes[:, :4]=np.round(boxes[:, :4],0)
+
                     if verbose:
                         print("======== bbox postprocess time:{0:.5f}".format((time.time() - time_time)))
                         time_time = time.time()
@@ -384,13 +370,9 @@ class YoloDetectionModel(ImageDetectionModel):
 
                     if verbose and locations is not None:
                         for i in range(len(locations)):
-                            print('         box{0}: {1} prob:{2:.2%} class:{3}'.format(i, [round(num, 4) for num in
+                            print('         box{0}: {1} prob:{2:.2%} class:{3}'.format(i, [np.round(num, 4) for num in
                                                                                            locations[i].tolist()], probs[i],
-                                                                                       labels[i] if self.class_names is
-                                                                                                 None or i >= len(
-                                                                                           self.class_names) else
-                                                                                       self.class_names[
-                                                                                           int(labels[i])]))
+                                                                                       labels[i] if self.class_names is None or int(labels[i]) >= len(self.class_names) else self.class_names[int(labels[i])]))
 
                     return img_orig,locations,labels,probs
 
@@ -409,7 +391,6 @@ class YoloDetectionModel(ImageDetectionModel):
             time_time = time.time()
 
         if boxes is not None and len(boxes) > 0:
-            boxes = np.round(boxes).astype(np.int32)
             if boxes.ndim == 1:
                 boxes = np.expand_dims(boxes, 0)
             if labels.ndim == 0:

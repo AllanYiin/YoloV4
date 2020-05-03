@@ -12,7 +12,11 @@ detector.preprocess_flow=[resize((608,608),keep_aspect=True),to_bgr(),normalize(
 #detection threshold
 detector.detection_threshold=0.4
 #iou_threshold
-detector.iou_threshold=0.6
+detector.iou_threshold=0.5
+
+for module in detector.model.modules():
+    if isinstance(module,YoloLayer):
+        module.small_item_enhance=True
 
 #freeze model
 detector.trainable=False
@@ -36,6 +40,6 @@ for i in range(len(imgs)):
     folder,filename,ext=split_path(imgs[i])
     if is_drawing:
         img=detector.infer_then_draw_single_image(imgs[i],verbose=True)
-        array2image(img).save(imgs[i].replace(filename,filename+'_infered'))
+        array2image(img).save(imgs[i].replace(filename,filename+'_pt_infered_enhance'))
     else:
         detector.infer_single_image(imgs[i], verbose=True)

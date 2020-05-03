@@ -15,9 +15,18 @@ https://github.com/ultralytics/yolov3
 ### results by yolo v4
 Let's look  the excellent performance about yolo v4!!
 
-![Alt text](images/jam_infered.jpg)
-![Alt text](images/pokemon_infered.jpg)
-![Alt text](images/motors_infered.jpg)
+![Alt text](images/jam_pt_infered.jpg)
+![Alt text](images/pokemon_pt_infered.jpg)
+![Alt text](images/motors_pt_infered.jpg)
+
+### update: small item enhance
+In yolo v4 have the shortage about missing detection of small itemes. 
+I try to fix the shortage. I found out The best way to fix  the issue is modify the objectness in stride=8 Yolo Layer (76*76)
+
+![Alt text](images/cars_infered_merge.png)
+![Alt text](images/book_infered_merge.png)
+
+
 
 
 this project is under my another project "trident", a higher order api both in pytorch and tensorflow, and I'll open-source soon.
@@ -55,3 +64,8 @@ You also can download my results in pytorch from google drive:
 [pytorch pretrained statedict](https://drive.google.com/open?id=1q2m_0GWSDgKcdtuoSwTXJGXs_DdsD3z-)
 
 
+### future work
+
+1. yolov4 for tensorflow eager mode (by trident tensorflow api)
+2. all the bag of freebies and bag of specials in training context.
+3. use yolov4 for custom datasets

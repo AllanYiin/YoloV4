@@ -14,7 +14,7 @@ def yolo4_body(num_classes=80,image_size=608):
     anchors2 = to_tensor(np.array([36, 75, 76, 55, 72, 146]).reshape(-1, 2),requires_grad=False)
     anchors3 = to_tensor(np.array([142, 110, 192, 243, 459, 401]).reshape(-1, 2),requires_grad=False)
     num_anchors=len(anchors1)
-    """Create YOLO_V4 model CNN body in Keras."""
+    """Create YOLO_V4 model CNN body in Pytorch."""
     return Sequential(
             DarknetConv2D_BN_Mish((3, 3), 32,name='first_layer'),
             resblock_body(64, 1, all_narrow=False,name='block64'),
@@ -222,6 +222,7 @@ def load_pretrained_weight(yolov4,cfg_path='pretrained/yolov4.cfg',weight_path='
                 # Load conv. weights
                 nw = conv.weight.numel()  # number of weights
                 conv.weight.data.copy_(to_tensor(weights[ptr:ptr + nw]).view_as(conv.weight))
+                print('{0} weights loaded....'.format(conv.defaultname))
                 ptr += nw
 
 
@@ -280,8 +281,12 @@ if __name__ == '__main__':
     import torch
     torch.save(detector.model, 'Models/pretrained_yolov4_mscoco.pth')
     detector.save_model('Models/pretrained_yolov4_mscoco.pth.tar')
-
-
+    detector.summary()
+    pypretrained_dict=detector.model.state_dict()
+    for k, v in pypretrained_dict.items():
+        if is_tensor(v):
+            pypretrained_dict[k] = to_numpy(v)
+    pickle_it('Models/pretrained_yolov4_mscoco.pkl',pypretrained_dict)
 
 
 
