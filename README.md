@@ -44,14 +44,14 @@ this project is under my another project "trident", a higher order api both in p
 
 
 ### how to install 
+
 trident only support python 3.x     
 If you want to use pytorch api, you need pytorch 1.2 or higher
-If you want to use tensorflow api, you need tensorflow 2.2.0rc0 or higher (because trident tensorflow  api  is pure eager mode "without keras, without static graph"")
+If you want to use tensorflow api (trident version>=0.5.5), you need tensorflow 2.2.0rc0 or higher (because trident tensorflow  api  is pure eager mode "without keras, without static graph"")
 You can install it from pip
 
-
-pip install tridentx   --upgrade  
-`
+    pip install tridentx   --upgrade  
+    
 
 
 after installed trident, you can use following syntax to import it and assign the backed.
@@ -73,7 +73,7 @@ after installed trident, you can use following syntax to import it and assign th
 7. onnx_video_infer.py: it's a demo how to use onnxruntime to infer video near real-time.
 
 
-You also can download my results in pytorch from google drive:
+You also can download my results in pytorch from google drive:    
 [pytorch pretrained model](https://drive.google.com/open?id=1-3FFc38AeySJpO9wKIAj6V9VZl3MITKW)   
 [pytorch pretrained state_dict](https://drive.google.com/open?id=1JAmyPZ71cizlDGsFXKuDOP5EE8MxEqJZ)   
 [tensorflow pretrained model](https://drive.google.com/open?id=1_ASrZdGbZZFerL1Fe8jEhwvrRzjyaSuo)      
