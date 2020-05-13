@@ -6,13 +6,10 @@ import math
 import os
 import time
 import numpy as np
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch._six import container_abcs
+import tensorflow as tf
 
 import os
-os.environ['TRIDENT_BACKEND'] = 'pytorch'
+os.environ['TRIDENT_BACKEND'] = 'tensorflow'
 import trident as T
 from trident import *
 
@@ -21,14 +18,11 @@ __all__ = [ 'resblock_body', 'YoloDetectionModel', 'DarknetConv2D', 'DarknetConv
            'DarknetConv2D_BN_Leaky', 'YoloLayer']
 
 _session = get_session()
-_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 _epsilon = _session.epsilon
 _trident_dir = _session.trident_dir
 
 anchors = np.array([12, 16, 19, 36, 40, 28, 36, 75, 76, 55, 72, 146, 142, 110, 192, 243, 459, 401]).reshape(
     (1, 1, 1, -1, 2))
-
-
 
 def DarknetConv2D(*args, **kwargs):
     """Wrapper to set Darknet parameters for Convolution2D."""
@@ -40,9 +34,9 @@ def DarknetConv2D(*args, **kwargs):
 
 def DarknetConv2D_BN_Leaky(*args, **kwargs):
     """Darknet Convolution2D followed by BatchNormalization and LeakyReLU."""
-    darknet_conv_kwargs = {'use_bias': False,'normalization':BatchNorm2d(momentum=0.03,eps=1e-4)}
-    darknet_conv_kwargs['activation']=LeakyRelu(alpha=0.1)
-    darknet_conv_kwargs['auto_pad'] = False if kwargs.get('strides')==(2,2) else True
+    darknet_conv_kwargs = {'use_bias': False, 'normalization': BatchNorm2d(momentum=0.03, eps=1e-4)}
+    darknet_conv_kwargs['activation'] = LeakyRelu(alpha=0.1)
+    darknet_conv_kwargs['auto_pad'] = False if kwargs.get('strides') == (2, 2) else True
     darknet_conv_kwargs.update(kwargs)
     return Conv2d_Block(*args, **darknet_conv_kwargs)
 
@@ -50,35 +44,30 @@ def DarknetConv2D_BN_Leaky(*args, **kwargs):
 
 def DarknetConv2D_BN_Mish(*args, **kwargs):
     """Darknet Convolution2D followed by BatchNormalization and LeakyReLU."""
-    darknet_conv_kwargs = {'use_bias': False, 'normalization':BatchNorm2d(momentum=0.03,eps=1e-4), 'activation': Mish()}
-    darknet_conv_kwargs['auto_pad'] = False if kwargs.get('strides')==(2,2) else True
+    darknet_conv_kwargs = {'use_bias': False, 'normalization': BatchNorm2d(momentum=0.03, eps=1e-4), 'activation': Mish()}
+    darknet_conv_kwargs['auto_pad'] = False if kwargs.get('strides') == (2, 2) else True
     darknet_conv_kwargs.update(kwargs)
     return Conv2d_Block(*args, **darknet_conv_kwargs)
 
 
 def resblock_body(num_filters, num_blocks, all_narrow=True,keep_output=False,name=''):
     return Sequential(
-        DarknetConv2D_BN_Mish((3, 3),num_filters ,strides=(2,2), auto_pad=False, padding=((1, 0), (1, 0)),name=name+'_preconv1'),
-        ShortCut2d(
-            {
-            1:DarknetConv2D_BN_Mish((1, 1), num_filters // 2 if all_narrow else num_filters, name=name + '_shortconv'),
-            0:Sequential(
-                DarknetConv2D_BN_Mish((1, 1), num_filters // 2 if all_narrow else num_filters,name=name+'_mainconv'),
+        DarknetConv2D_BN_Mish((3, 3), num_filters, strides=(2, 2), auto_pad=True,name=name + '_preconv1'),
+        ShortCut2d({
+            1: DarknetConv2D_BN_Mish((1, 1), num_filters // 2 if all_narrow else num_filters, name=name + '_shortconv'),
+            0: Sequential(
+                DarknetConv2D_BN_Mish((1, 1), num_filters // 2 if all_narrow else num_filters, name=name + '_mainconv'),
                 For(range(num_blocks), lambda i:
                     ShortCut2d(
                         Identity(),
                         Sequential(
-                            DarknetConv2D_BN_Mish((1, 1),num_filters // 2,name=name+'_for{0}_1'.format(i)),
-                            DarknetConv2D_BN_Mish((3, 3),num_filters // 2 if all_narrow else num_filters,name=name+'_for{0}_2'.format(i))
-                        ),
-                        mode='add')
-                ),
-                DarknetConv2D_BN_Mish( (1, 1),num_filters // 2 if all_narrow else num_filters,name=name+'_postconv')
-            )},
-            mode='concate',name=name+'_route'),
+                            DarknetConv2D_BN_Mish((1, 1), num_filters // 2, name=name + '_for{0}_1'.format(i)),
+                            DarknetConv2D_BN_Mish((3, 3), num_filters // 2 if all_narrow else num_filters,name=name + '_for{0}_2'.format(i))),
+                    mode='add')),
+                DarknetConv2D_BN_Mish((1, 1), num_filters // 2 if all_narrow else num_filters,name=name + '_postconv'))},
+        mode='concate', axis=-1,name=name + '_route'),
+        DarknetConv2D_BN_Mish((1, 1), num_filters, name=name + '_convblock5'))
 
-        DarknetConv2D_BN_Mish((1,1),num_filters,name=name+'_convblock5')
-        )
 
 
 
@@ -91,72 +80,68 @@ class YoloLayer(Layer):
 
     def __init__(self, anchors, num_classes,grid_size, img_dim=608,small_item_enhance=False):
         super(YoloLayer, self).__init__()
+        self.img_dim = img_dim
+        self.grid_size = grid_size  # grid size
 
-        self.register_buffer('anchors', to_tensor(anchors, requires_grad=False).to(get_device()))
-        self.small_item_enhance = small_item_enhance
+        self.grid = reshape(meshgrid(grid_size, grid_size), (1, grid_size, grid_size, 1,2))
+        self.register_buffer('anchors', tf.cast(to_tensor(anchors),tf.float32))
+
         self.num_anchors = len(anchors)
         self.num_classes = num_classes
+
         self.ignore_thres = 0.5
-        # self.mse_loss = nn.MSELoss()
-        # self.bce_loss = nn.BCELoss()
+        self.small_item_enhance=small_item_enhance
+        # self.mse_loss = MSELoss()
+        # self.bce_loss = BCELoss()
         self.obj_scale = 1
         self.noobj_scale = 100
         self.metrics = {}
-        self.img_dim = img_dim
-        self.grid_size=grid_size
 
-        #self.grid_size = to_tensor(grid_size) # grid size
-        #yv, xv = torch.meshgrid([torch.arange(grid_size), torch.arange(grid_size)])
-        #self.register_buffer('grid',  torch.stack((xv.detach(), yv.detach()), 2).view((1, 1, grid_size, grid_size, 2)).float().detach())
 
-        self.stride = self.img_dim / grid_size
 
         self.compute_grid_offsets(grid_size)
 
     def compute_grid_offsets(self, grid_size):
+        stride = self.img_dim / grid_size
+        self.anchor_vec = self.anchors / stride
+        self.anchor_wh = reshape(self.anchor_vec,(1,1,1,self.num_anchors, 2))
+        self.grid = reshape(meshgrid(grid_size, grid_size), (1, grid_size, grid_size, 1, 2))
 
-        self.register_buffer('grid', meshgrid(grid_size,grid_size,requires_grad=False).view((1, 1, grid_size, grid_size, 2)).float().detach())
-        #self.grid=meshgrid(grid_size,grid_size,requires_grad=False).view((1, 1, grid_size, grid_size, 2)).float().detach()
 
         # Calculate offsets for each grid
 
     def forward(self, x, targets=None):
-        num_batch = x.size(0)
-        grid_size = x.size(-1)
-
-        if self.training and (self.grid_size!=x.size(-1) or self.grid_size!=x.size(-2)):
+        num_samples = x.shape.as_list()[0]
+        grid_size = x.shape.as_list()[2]
+        if grid_size!=self.grid_size or self.grid is None :
             self.compute_grid_offsets(grid_size)
 
-        self.grid.to(get_device())
-        self.anchors.to(get_device())
-        anchor_vec = self.anchors/ self.stride
-        anchor_wh = anchor_vec.view(1, self.num_anchors, 1, 1, 2)
 
-
-        prediction = x.view(num_batch, self.num_anchors, self.num_classes + 5, grid_size, grid_size).permute(0, 1, 3, 4, 2).contiguous()
-        if self.training:
-            return reshape(prediction,(num_batch, -1, self.num_classes + 5))
-
-            # Get outputs
+        #tf and pytorch have different shape in Yolo Layer
+        #pytorch: batch , num_anchors, image height, image width, class+5
+        # tf        : batch , image height, image width, num_anchors, class+5
+        prediction = reshape(x,(num_samples, grid_size, grid_size,self.num_anchors, self.num_classes + 5))
+        stride=self.img_dim / grid_size
+        # Get outputs
         xy = sigmoid(prediction[..., 0:2])  # Center x
         wh = prediction[..., 2:4]  # Width
-
-        xy = reshape((xy + self.grid) * self.stride, (num_batch, -1, 2))
-        wh = reshape((exp(wh) * anchor_wh) * self.stride, (num_batch, -1, 2))
-
-        pred_conf = sigmoid(prediction[..., 4])  # Conf
+        pred_conf=sigmoid(prediction[..., 4:5])
         pred_class = sigmoid(prediction[..., 5:])  # Cls pred.
 
-        pred_conf = reshape(pred_conf, (num_batch, -1, 1))
-        pred_class = reshape(pred_class, (num_batch, -1, self.num_classes))
+        # Add offset and scale with anchors
+
+        #ensorflow.python.framework.ops.EagerTensor' object does not support item assignment
+        xy= reshape((xy + self.grid)* stride,(num_samples, -1, 2))
+        wh= reshape((exp(wh) * self.anchor_wh)* stride,(num_samples, -1, 2))
+
+        pred_conf = reshape(pred_conf, (num_samples, -1, 1))
+        pred_class=reshape(pred_class,(num_samples, -1, self.num_classes))
         cls_probs = reduce_max(pred_class, -1, keepdims=True)
 
-        if self.small_item_enhance and self.stride == 8:
-            pred_conf = (pred_conf * cls_probs).sqrt()
+        if self.small_item_enhance and stride == 8:
+            pred_conf = sqrt(pred_conf * cls_probs)
 
-        output = torch.cat([xy, wh, pred_conf, pred_class], -1)
-
-
+        output = concate([xy,wh,pred_conf,pred_class], -1 )
         return output
         # if targets is None:  #     return output,  # else:  #     iou_scores, class_mask, obj_mask,
         # noobj_mask, tx, ty, tw, th, tcls, tconf = build_targets(  #         pred_boxes=pred_boxes,
@@ -187,9 +172,9 @@ class YoloLayer(Layer):
 class YoloDetectionModel(ImageDetectionModel):
     def __init__(self, inputs=None, output=None, input_shape=None):
         super(YoloDetectionModel, self).__init__(inputs, output, input_shape)
-        self.preprocess_flow = [resize((input_shape[-2], input_shape[-1]), True), normalize(0, 255)]
-        self.detection_threshold = 0.7
-        self.iou_threshold = 0.3
+        self.preprocess_flow = [resize((input_shape[0], input_shape[1]), True), normalize(0, 255)]
+        self.detection_threshold = 0.4
+        self.iou_threshold = 0.5
         self.class_names = None
         self.palette = generate_palette(80)
 
@@ -324,13 +309,12 @@ class YoloDetectionModel(ImageDetectionModel):
         return boxes[pick], pick
 
     def infer_single_image(self, img, scale=1, verbose=False):
-        time_time =None
+        time_time = None
         if verbose:
             time_time = time.time()
             print("==-----  starting infer {0} -----=======".format(img))
         if self._model.built:
             try:
-                self._model.to(self.device)
                 self._model.eval()
                 img = image2array(img)
                 if img.shape[-1] == 4:
@@ -344,7 +328,7 @@ class YoloDetectionModel(ImageDetectionModel):
                             scale = func.scale
 
                 img = image_backend_adaption(img)
-                inp = to_tensor(np.expand_dims(img, 0)).to(self.device).to(self._model.weights[0].data.dtype)
+                inp = to_tensor(np.expand_dims(img, 0))
 
                 if verbose:
                     print("======== data preprocess time:{0:.5f}".format((time.time() - time_time)))
@@ -354,38 +338,43 @@ class YoloDetectionModel(ImageDetectionModel):
                 if verbose:
                     print("======== infer  time:{0:.5f}".format((time.time() - time_time)))
                     time_time = time.time()
-
+                boxes = to_numpy(boxes)
                 mask = boxes[:, 4] > self.detection_threshold
                 boxes = boxes[mask]
                 if verbose:
                     print('         detection threshold:{0}'.format(self.detection_threshold))
                     print('         {0} bboxes keep!'.format(len(boxes)))
                 if boxes is not None and len(boxes) > 0:
-                    boxes = concate([xywh2xyxy(boxes[:, :4]), boxes[:, 4:]], axis=-1)
                     boxes = to_numpy(boxes)
+                    boxes = np.concatenate([xywh2xyxy(boxes[:, :4]), boxes[:, 4:]], axis=-1)
+                    boxes_location = boxes[:, :5]
+                    boxes_class = boxes[:, 5:]
                     if len(boxes) > 1:
-                        box_probs, keep = self.hard_nms(boxes[:, :5], iou_threshold=self.iou_threshold, top_k=-1, )
-                        boxes = boxes[keep]
+                        _, keep = self.hard_nms(boxes_location, iou_threshold=self.iou_threshold, top_k=-1, )
+                        boxes_location = boxes_location[keep]
+                        boxes_class=boxes_class[keep]
                         print('         iou threshold:{0}'.format(self.iou_threshold))
-                        print('         {0} bboxes keep!'.format(len(boxes)))
-                    boxes[:, :4] /=scale
-                    boxes[:, :4]=np.round(boxes[:, :4],0)
+                        print('         {0} bboxes keep!'.format(len(boxes_location)))
+
+
+                    boxes_location[:, :4] /= scale
+                    boxes_location[:, :4] = np.round(boxes_location[:, :4], 0)
 
                     if verbose:
                         print("======== bbox postprocess time:{0:.5f}".format((time.time() - time_time)))
                         time_time = time.time()
                     # boxes = boxes * (1 / scale[0])
-                    locations= boxes[:, :4]
-                    probs = boxes[:, 4]
-                    labels=np.argmax(boxes[:, 5:], -1).astype(np.int32)
+                    locations = boxes_location[:, :4]
+                    probs = boxes_location[:, 4]
+                    labels = np.argmax(boxes_class, -1).astype(np.int32)
 
                     if verbose and locations is not None:
                         for i in range(len(locations)):
-                            print('         box{0}: {1} prob:{2:.2%} class:{3}'.format(i, [np.round(num, 4) for num in
-                                                                                           locations[i].tolist()], probs[i],
-                                                                                       labels[i] if self.class_names is None or int(labels[i]) >= len(self.class_names) else self.class_names[int(labels[i])]))
+                            print('         box{0}: {1} prob:{2:.2%} class:{3}'.format(i, locations[i].astype(np.int32),
+                                                                                       probs[i], labels[ i] if self.class_names is None or int(
+                                    labels[i]) >= len(self.class_names) else self.class_names[int(labels[i])]))
 
-                    return img_orig,locations,labels,probs
+                    return img_orig, locations, labels, probs
 
                 else:
                     return img_orig, None, None, None
@@ -395,6 +384,7 @@ class YoloDetectionModel(ImageDetectionModel):
             raise ValueError('the model is not built yet.')
 
     def infer_then_draw_single_image(self, img, scale=1, verbose=False):
+
         rgb_image, boxes, labels, probs = self.infer_single_image(img, scale, verbose)
         time_time = None
         if verbose:
@@ -409,11 +399,14 @@ class YoloDetectionModel(ImageDetectionModel):
             for m in range(len(boxes)):
                 this_box = boxes[m]
                 this_label = labels[m]
-                thiscolor=tuple([int(c) for c in self.palette[this_label][:3]])
-                pillow_img=plot_bbox(this_box, pillow_img, thiscolor,self.class_names[int(this_label)], line_thickness=2)
+                thiscolor = tuple([int(c) for c in self.palette[this_label][:3]])
+                pillow_img = plot_bbox(this_box, pillow_img, thiscolor, self.class_names[int(this_label)], line_thickness=2)
             rgb_image = np.array(pillow_img.copy())
+        # rgb_image = cv2.cvtColor(bgr_image, cv2.COLOR_RGB2BGR)
         if verbose:
             print("======== draw image time:{0:.5f}".format((time.time() - time_time)))
         return rgb_image
+
+
 
 
